@@ -3,9 +3,12 @@ library(sp)
 library(sf)
 library(terra)
 
+kernel_type <- "tricube"
+
 messdaten <- read.csv("Data/heatdata_cleaned_20260630_abend.csv", sep=";")
 punkte_sf <- st_as_sf(messdaten, coords = c("Lon", "Lat"), crs = 4326)
 punkte_sf <- st_transform(punkte_sf, crs = 25832)
+
 
 ndvi <- rast("Data/gi_ndvi_utm32n.tif")
 svf <- rast("Data/svf_gi_200m.tif")
@@ -55,7 +58,7 @@ print("Suche optimale Bandbreite...")
 bw_opt <- bw.gwr(gleichung, 
                  data = punkte_sp, 
                  approach = "AICc", 
-                 kernel = "bisquare", 
+                 kernel = kernel_type, 
                  adaptive = TRUE)
 
 print(paste("Die optimale Bandbreite (Anzahl Nachbarn) ist:", bw_opt))
@@ -64,7 +67,7 @@ print(paste("Die optimale Bandbreite (Anzahl Nachbarn) ist:", bw_opt))
 # Angenommen, das hat jetzt z.B. 1 Million Zeilen.
 
 # 2. Wie viele Pixel sollen pro Durchgang berechnet werden?
-chunk_size <- 1000 
+chunk_size <- 2000 
 anzahl_zeilen <- nrow(grid_df)
 
 # Eine leere Liste vorbereiten, in die wir die fertigen Temperaturen packen
@@ -93,7 +96,7 @@ for (i in seq(1, anzahl_zeilen, by = chunk_size)) {
                             data = punkte_sp, 
                             predictdata = chunk_sp, 
                             bw = bw_opt, 
-                            kernel = "bisquare", 
+                            kernel = kernel_type, 
                             adaptive = TRUE)
   
   # Speichere die vorhergesagten Temperaturen in unsere lange Liste
@@ -112,4 +115,4 @@ grid_df$Temp_pred <- alle_vorhersagen
 # 5. Wie gehabt in ein Raster umwandeln und speichern
 heatmap_raster <- rast(grid_df[, c("x", "y", "Temp_pred")], type = "xyz", crs = "EPSG:25832")
 plot(heatmap_raster, col = hcl.colors(100, "Inferno"), main = "GWR Temperatur-Heatmap (°C)")
-writeRaster(heatmap_raster, "GWR_Heatmap_Watzenborn_Hochaufloesend.tif", overwrite = TRUE)
+writeRaster(heatmap_raster, paste("GWR_Heatmap_Gießen_10m_",kernel_type,".tif"), overwrite = TRUE)
