@@ -3,26 +3,22 @@ library(sp)
 library(sf)
 library(terra)
 
-# ---------------------------------------------------------
-# 1. PARAMETER FÜR DIE SCHLEIFEN DEFINIEREN
-# ---------------------------------------------------------
-kernel_typen <- c("gaussian", "bisquare")
+# Schleifenparameter
+kernel_typen <- c("bisquare") 
 ziel_variablen <- c("Temp", "Temp_Diff")
 
-# WICHTIG: Die Namen müssen exakt zu den Dateinamen passen!
+# Die Namen müssen exakt zu den Dateinamen passen!
 tageszeiten <- c("morgen", "mittag", "abend")
 
-# Ordnerstruktur für Dateien anlegen
-# Wir mappen den Tageszeiten-String auf die echten Dateinamen
+
 datei_mapping <- list(
   "morgen" = "Data/heatdata_cleaned_20260630_morgen.csv",
   "mittag" = "Data/heatdata_mittag_traffic_wd.csv",
   "abend"  = "Data/heatdata_cleaned_20260630_abend.csv"
 )
 
-# ---------------------------------------------------------
-# 2. EINMALIGES VORBEREITEN DER UMWELT-RASTER 
-# ---------------------------------------------------------
+if(!dir.exists("heatmaps")) dir.create("heatmaps")
+# vorbereiten der Raster
 print("Bereite Hintergrund-Raster vor...")
 
 ndvi <- rast("Data/gi_ndvi_utm32n.tif")
@@ -44,13 +40,13 @@ svf_angepasst <- resample(svf, ndvi_mask, method="bilinear")
 impervious_angepasst <- resample(impervious, ndvi_mask, method="bilinear")
 street_dens_angepasst <- resample(street_dens, ndvi_mask, method="bilinear")
 
-# Traffic rastern (für den Fall, dass es gebraucht wird)
+# Traffic rastern
 traffic_raster <- rasterize(traffic_terra, ndvi_mask, field = "relative_s", background = 1)
 
-# Einmalig das Prediction-Grid bauen
+# prediction grid erstellen
 basis_stapel <- c(ndvi_mask, svf_angepasst, impervious_angepasst, street_dens_angepasst, traffic_raster)
 names(basis_stapel) <- c("ndvi", "svf", "impervious", "street_dens", "traffic_speed")
-# Aggregation hier einstellen, falls gewünscht (z.B. fact=1 oder fact=2)
+
 basis_stapel <- aggregate(basis_stapel, fact= 1) 
 
 grid_df <- as.data.frame(basis_stapel, xy = TRUE, na.rm = TRUE)
@@ -59,21 +55,14 @@ grid_sp <- as(grid_sf, "Spatial")
 anzahl_zeilen <- nrow(grid_df)
 chunk_size <- 4000 
 
-# Leere Liste für die fertigen Raster (für den finalen Plot)
 alle_fertigen_raster <- list()
-# ---------------------------------------------------------
-# 3. DIE SCHLEIFEN & PLOTTING
-# ---------------------------------------------------------
+
+# berechnung gwr
 
 for (tageszeit in tageszeiten) {
   
-  # NEU: Liste für die Raster NUR für die aktuelle Tageszeit leeren
-  tageszeit_raster_liste <- list()
-  
-  # Traffic Logik: Traffic nur mittags nutzen
   istraffic <- ifelse(tageszeit == "mittag", TRUE, FALSE)
   
-  # Aktuelle CSV laden
   csv_pfad <- datei_mapping[[tageszeit]]
   print(paste("----- LADE DATEN FÜR:", toupper(tageszeit), "-----"))
   messdaten <- read.csv(csv_pfad, sep=";")
@@ -81,7 +70,6 @@ for (tageszeit in tageszeiten) {
   punkte_sf <- st_as_sf(messdaten, coords = c("Lon", "Lat"), crs = 4326)
   punkte_sf <- st_transform(punkte_sf, crs = 25832)
   
-  # Rasterwerte extrahieren
   raster_werte <- extract(basis_stapel, punkte_sf)
   punkte_sf$ndvi <- raster_werte$ndvi
   punkte_sf$svf <- raster_werte$svf
@@ -95,7 +83,6 @@ for (tageszeit in tageszeiten) {
   
   for (temp_col in ziel_variablen) {
     
-    # Checken, ob die Spalte in der CSV existiert
     if (!(temp_col %in% names(messdaten))) {
       print(paste("Spalte", temp_col, "existiert nicht in", tageszeit, "-> Überspringe."))
       next
@@ -144,45 +131,43 @@ for (tageszeit in tageszeiten) {
       
       aktuelles_raster <- rast(grid_df_lokal[, c("x", "y", "Temp_pred")], type = "xyz", crs = "EPSG:25832")
       
-      # Name für den Plot
-      plot_titel <- paste(temp_col, kernel_type, sep="_")
+      # plot name
+      plot_titel <- paste(tools::toTitleCase(tageszeit), temp_col, sep=" - ")
       names(aktuelles_raster) <- plot_titel
       
-      # In die Liste der AKTUELLEN Tageszeit speichern
-      tageszeit_raster_liste[[plot_titel]] <- aktuelles_raster
+      # liste für finalen plot
+      listen_key <- paste(tageszeit, temp_col, sep="_")
+      alle_fertigen_raster[[listen_key]] <- aktuelles_raster
       
-      # TIF abspeichern
-      writeRaster(aktuelles_raster, paste0("heatmaps/", tageszeit, "_", plot_titel, ".tif"), overwrite = TRUE)
+      writeRaster(aktuelles_raster, paste0("heatmaps/", tageszeit, "_", temp_col, "_", kernel_type, ".tif"), overwrite = TRUE)
       
     } # Ende Kernel-Loop
   } # Ende Variablen-Loop
+} 
+
+# plotting
+if (length(alle_fertigen_raster) > 0) {
+  print("Erstelle finalen Gesamt-Plot...")
   
-  # ---------------------------------------------------------
-  # NEU: PLOT FÜR DIE JEWEILIGE TAGESZEIT ERSTELLEN
-  # ---------------------------------------------------------
-  if (length(tageszeit_raster_liste) > 0) {
-    print(paste("Erstelle Plot für", tageszeit, "..."))
-    
-    tageszeit_stapel <- rast(tageszeit_raster_liste)
-    
-    # PNG Datei anlegen (z.B. GWR_Uebersicht_morgen.png)
-    png(paste0("heatmaps/GWR_Uebersicht_", tageszeit, ".png"), width=1200, height=1000, res=150)
-    
-    par(oma = c(0, 0, 3, 0))
-    # Die Karten für diese Tageszeit im 2x2 Grid plotten
-    plot(tageszeit_stapel, 
-         
-         col = hcl.colors(100, "heat", rev = TRUE),
-         main = names(tageszeit_stapel), 
-         mar = c(2, 2, 2, 2),
-         axes = FALSE)
-         
-    titel_text <- paste("GWR Vorhersagen - Tageszeit:", toupper(tageszeit))
-    mtext(titel_text, side = 3, outer = TRUE, cex = 1.5, font = 2)
-    # Plot speichern und schließen
-    dev.off()
-  }
+  finaler_stapel <- rast(alle_fertigen_raster)
   
-} # Ende Tageszeiten-Loop
+  png("heatmaps/GWR_Tagesverlauf_Uebersicht.png", width=1600, height=2200, res=200)
+  
+  par(oma = c(0, 0, 4, 0)) # Platz für Haupttitel oben 
+  
+  # nr = 3 (Zeilen) und nc = 2 (Spalten) 
+  plot(finaler_stapel, 
+       nr = 3, nc = 2,
+       col = hcl.colors(100, "heat", rev = TRUE),
+       main = names(finaler_stapel), 
+       mar = c(2, 2, 3, 4), #  Platz rechts für die Legende lassen
+       axes = FALSE)
+  
+  titel_text <- paste("GWR Vorhersagen ( Kernel:", kernel_typen[1], ")")
+  mtext(titel_text, side = 3, outer = TRUE, line = 2, cex = 1.8, font = 2)
+  
+  dev.off()
+  print("Plot gespeichert unter: heatmaps/GWR_Tagesverlauf_Uebersicht.png")
+}
 
 print("Alle Durchläufe und Plots sind fertig!")
