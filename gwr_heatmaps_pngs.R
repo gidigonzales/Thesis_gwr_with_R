@@ -168,12 +168,17 @@ for (tageszeit in tageszeiten) {
     # PNG Datei anlegen (z.B. GWR_Uebersicht_morgen.png)
     png(paste0("heatmaps/GWR_Uebersicht_", tageszeit, ".png"), width=1200, height=1000, res=150)
     
+    par(oma = c(0, 0, 3, 0))
     # Die Karten für diese Tageszeit im 2x2 Grid plotten
     plot(tageszeit_stapel, 
-         col = hcl.colors(100, "Inferno"),
+         
+         col = hcl.colors(100, "heat", rev = TRUE),
          main = names(tageszeit_stapel), 
-         mar = c(2, 2, 2, 2))
-    
+         mar = c(2, 2, 2, 2),
+         axes = FALSE)
+         
+    titel_text <- paste("GWR Vorhersagen - Tageszeit:", toupper(tageszeit))
+    mtext(titel_text, side = 3, outer = TRUE, cex = 1.5, font = 2)
     # Plot speichern und schließen
     dev.off()
   }
