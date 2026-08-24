@@ -2,7 +2,7 @@ library(GWmodel)
 library(sp)
 library(sf)
 library(terra)
-
+# die einzelnen Blöcke sind in der anderen Datei besser beschrieben
 # Schleifenparameter
 kernel_typen <- c("bisquare") 
 ziel_variablen <- c("Temp", "Temp_Diff")
@@ -53,6 +53,7 @@ grid_df <- as.data.frame(basis_stapel, xy = TRUE, na.rm = TRUE)
 grid_sf <- st_as_sf(grid_df, coords = c("x", "y"), crs = 25832)
 grid_sp <- as(grid_sf, "Spatial")
 anzahl_zeilen <- nrow(grid_df)
+# chunk size darf nicht zu groß sein, da sonst R abbricht
 chunk_size <- 4000 
 
 alle_fertigen_raster <- list()
